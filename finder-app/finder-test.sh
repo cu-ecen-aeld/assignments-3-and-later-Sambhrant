@@ -56,6 +56,9 @@ done
 
 OUTPUTSTRING=$(finder.sh "$WRITEDIR" "$WRITESTR")
 
+# write output to result file
+echo "${OUTPUTSTRING}" > /tmp/assignment4-result.txt
+
 # remove temporary directories
 rm -rf /tmp/aeld-data
 
