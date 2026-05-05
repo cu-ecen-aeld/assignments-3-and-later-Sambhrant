@@ -173,6 +173,7 @@ static int append_packet_and_respond(int client_fd, const char *packet, size_t p
     return ret;
 }
 
+#ifdef ENABLE_TIMESTAMP_THREAD
 static void *timestamp_thread_func(void *arg)
 {
     (void)arg;
@@ -233,6 +234,7 @@ static void *timestamp_thread_func(void *arg)
 
     return NULL;
 }
+#endif
 
 static void *client_thread_func(void *arg)
 {
@@ -290,11 +292,29 @@ static void *client_thread_func(void *arg)
 
 cleanup:
     free(packet);
-    close(node->client_fd);
-    node->client_fd = -1;
+
+    if (node->client_fd != -1) {
+        shutdown(node->client_fd, SHUT_RDWR);
+        close(node->client_fd);
+        node->client_fd = -1;
+    }
+
     syslog(LOG_DEBUG, "Closed connection from %s", node->client_ip);
     node->thread_complete_success = true;
     return arg;
+}
+
+static void shutdown_all_client_fds(void)
+{
+    struct thread_node *node;
+
+    pthread_mutex_lock(&list_mutex);
+    SLIST_FOREACH(node, &thread_head, entries) {
+        if (node->client_fd != -1) {
+            shutdown(node->client_fd, SHUT_RDWR);
+        }
+    }
+    pthread_mutex_unlock(&list_mutex);
 }
 
 static void join_completed_threads(bool join_all)
@@ -303,7 +323,6 @@ static void join_completed_threads(bool join_all)
     struct thread_node *tmp;
 
     pthread_mutex_lock(&list_mutex);
-
     node = SLIST_FIRST(&thread_head);
 
     while (node != NULL) {
@@ -397,12 +416,16 @@ int main(int argc, char *argv[])
         }
     }
 
+#ifdef ENABLE_TIMESTAMP_THREAD
     pthread_t timestamp_thread;
+    bool timestamp_thread_started = false;
     if (pthread_create(&timestamp_thread, NULL, timestamp_thread_func, NULL) != 0) {
         close(listen_fd);
         closelog();
         return -1;
     }
+    timestamp_thread_started = true;
+#endif
 
     while (!exit_requested) {
         struct sockaddr_in client_addr;
@@ -435,15 +458,18 @@ int main(int argc, char *argv[])
 
         syslog(LOG_DEBUG, "Accepted connection from %s", node->client_ip);
 
+        pthread_mutex_lock(&list_mutex);
+        SLIST_INSERT_HEAD(&thread_head, node, entries);
+        pthread_mutex_unlock(&list_mutex);
+
         if (pthread_create(&node->thread_id, NULL, client_thread_func, node) != 0) {
+            pthread_mutex_lock(&list_mutex);
+            SLIST_REMOVE(&thread_head, node, thread_node, entries);
+            pthread_mutex_unlock(&list_mutex);
             close(client_fd);
             free(node);
             continue;
         }
-
-        pthread_mutex_lock(&list_mutex);
-        SLIST_INSERT_HEAD(&thread_head, node, entries);
-        pthread_mutex_unlock(&list_mutex);
 
         join_completed_threads(false);
     }
@@ -455,7 +481,14 @@ int main(int argc, char *argv[])
         listen_fd = -1;
     }
 
-    pthread_join(timestamp_thread, NULL);
+    shutdown_all_client_fds();
+
+#ifdef ENABLE_TIMESTAMP_THREAD
+    if (timestamp_thread_started) {
+        pthread_join(timestamp_thread, NULL);
+    }
+#endif
+
     join_completed_threads(true);
 
     unlink(DATA_FILE);
