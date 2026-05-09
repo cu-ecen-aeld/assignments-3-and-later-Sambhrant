@@ -31,32 +31,35 @@ struct aesd_buffer_entry *aesd_circular_buffer_find_entry_offset_for_fpos(
         size_t char_offset,
         size_t *entry_offset_byte_rtn)
 {
-    size_t total = 0;
-    uint8_t index = 0;
+    size_t total_size = 0;
+    size_t entry_count;
+    uint8_t index;
+    size_t i;
 
-    /* Find the entry that contains char_offset. */
-    do {
-        const struct aesd_buffer_entry *e = &buffer->entry[index];
+    if (buffer == NULL) {
+        return NULL;
+    }
 
-        if (e->size == 0) {
-            /* Empty entry; skip. */
-            index = (index + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
-            continue;
-        }
+    entry_count = buffer->full ?
+        AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED :
+        buffer->in_offs;
 
-        if (char_offset < total + e->size) {
-            /* char_offset is inside this entry. */
+    index = buffer->out_offs;
+
+    for (i = 0; i < entry_count; i++) {
+        struct aesd_buffer_entry *entry = &buffer->entry[index];
+
+        if (char_offset < (total_size + entry->size)) {
             if (entry_offset_byte_rtn != NULL) {
-                *entry_offset_byte_rtn = char_offset - total;
+                *entry_offset_byte_rtn = char_offset - total_size;
             }
-            return (struct aesd_buffer_entry *)e;
+            return entry;
         }
 
-        total += e->size;
+        total_size += entry->size;
         index = (index + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
-    } while (index != buffer->out_offs);
+    }
 
-    /* If we got here, char_offset is beyond the end of all written entries. */
     return NULL;
 }
 

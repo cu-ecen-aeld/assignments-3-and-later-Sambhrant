@@ -11,7 +11,6 @@ set(AUTOTEST_SOURCES
     test/assignment1/Test_hello.c
     test/assignment1/Test_assignment_validate.c
     test/assignment7/Test_circular_buffer.c
-
 )
 # A list of all files containing test code that is used for assignment validation
 set(TESTED_SOURCE
